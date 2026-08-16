@@ -7,13 +7,10 @@ from datetime import datetime
 import json
 import io
 
-# 1. Page Configuration
 st.set_page_config(page_title="Smart Roll Call & Attendance System", layout="wide")
 
-# Groq Client Initialization (Streamlit Secrets မှ API Key ကို ယူမည်)
 client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
-# 2. Database Initialization (SQLite) - ဌာန၊ ဘာသာရပ်၊ ဆရာနာမည်များ အပါအဝင်
 def init_db():
     conn = sqlite3.connect('attendance_system.db')
     cursor = conn.cursor()
@@ -40,28 +37,25 @@ def init_db():
 
 init_db()
 
-st.title("📋 Smart Roll Call & Attendance Management System")
+st.title("Smart Roll Call & Attendance Management System")
 st.write("ဘာသာရပ်၊ ဆရာအမည်နှင့် ကျောင်းသား Roll No များပါဝင်သော Roll Call စာရွက်ပုံကို အလိုအလျောက်ဖတ်ရှု၍ သိမ်းဆည်းခြင်း")
 
-# Sidebar Settings
-st.sidebar.header("⚙️ ဆက်တင်များနှင့် စစ်ထုတ်ရန်")
-selected_semester = st.sidebar.selectbox("Semester ကို ရွေးပါ", ["First Semester", "Second Semester"])
-selected_class = st.sidebar.text_input("အခန်းအမည် (Class/Section)", value="VI CS")
-selected_month = st.sidebar.text_input("လနှင့်နှစ် (Month-Year)", value=datetime.now().strftime("%Y-%m"))
+st.sidebar.header("Settings & Filters")
+selected_semester = st.sidebar.selectbox("Select Semester", ["First Semester", "Second Semester"])
+selected_class = st.sidebar.text_input("Class/Section", value="VI CS")
+selected_month = st.sidebar.text_input("Month-Year", value=datetime.now().strftime("%Y-%m"))
 
-# 3. File Uploader for Roll Call Image
-uploaded_file = st.file_uploader("Roll Call စာရွက်ပုံကို တင်ပါ (JPG, PNG)", type=["jpg", "jpeg", "png"])
+uploaded_file = st.file_uploader("Upload Roll Call Form (JPG, PNG)", type=["jpg", "jpeg", "png"])
 
 if uploaded_file:
     st.image(uploaded_file, caption="Uploaded Roll Call Form", use_container_width=True)
     
-    if st.button("🔍 AI ဖြင့် ဖတ်ရှုပြီး Database သို့ သိမ်းမည်"):
-        with st.spinner("စာရွက်ကို စစ်ဆေးပြီး အချက်အလက်များ သိမ်းဆည်းနေပါပြီ..."):
+    if st.button("AI Attendance ဖတ်မည်"):
+        with st.spinner("Processing image and extracting data..."):
             image_bytes = uploaded_file.getvalue()
             mime_type = uploaded_file.type
             base64_image = base64.b64encode(image_bytes).decode('utf-8')
             
-            # AI ကို Header အချက်အလက်များနှင့် ကျောင်းသားစာရင်းများကို JSON ဖြင့် တိကျစွာတောင်းမည့် Prompt
             prompt = """
             Analyze this student attendance sheet image carefully.
             Extract the following information from the header:
@@ -71,12 +65,12 @@ if uploaded_file:
             - teacher_name (string)
 
             And extract each student's record:
-            - roll_no (string, e.g., "VI CS-42")
+            - roll_no (string)
             - student_name (string)
             - total_present (integer)
             - total_absent (integer)
 
-            Return ONLY a valid JSON object with two keys: "header" (an object containing department_name, subject_name, subject_code, teacher_name) and "students" (an array of student objects). No extra text or markdown ticks.
+            Return ONLY a valid JSON object with two keys: "header" and "students". No extra text or markdown ticks.
             """
             
             try:
@@ -109,7 +103,6 @@ if uploaded_file:
                 header = parsed_data.get("header", {})
                 students = parsed_data.get("students", [])
                 
-                # Database ထဲသို့ ထည့်သွင်းခြင်း
                 conn = sqlite3.connect('attendance_system.db')
                 cursor = conn.cursor()
                 current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -142,14 +135,13 @@ if uploaded_file:
                 
                 conn.commit()
                 conn.close()
-                st.success("🎉 ဘာသာရပ်ဆိုင်ရာ အချက်အလက်များနှင့် ကျောင်းသားစာရင်းများကို Database ထဲသို့ အောင်မြင်စွာ သိမ်းဆည်းပြီးပါပြီ!")
+                st.success("Successfully saved to Database!")
                 
             except Exception as e:
-                st.error(f"Error ဖြစ်ပွားပါသည်: {e}")
+                st.error(f"Error occurred: {e}")
 
-# 4. Database Records Viewer & Dashboard Section
 st.markdown("---")
-st.subheader("📈 Attendance Dashboard နှင့် စာရင်းချုပ်များ")
+st.subheader("Attendance Dashboard")
 
 conn = sqlite3.connect('attendance_system.db')
 df = pd.read_sql("SELECT * FROM attendance_records", conn)
@@ -158,42 +150,38 @@ conn.close()
 if not df.empty:
     col1, col2, col3 = st.columns(3)
     with col1:
-        f_class = st.selectbox("အခန်းအလိုက် စစ်ထုတ်ရန်", df['class_name'].unique())
+        f_class = st.selectbox("Filter Class", df['class_name'].unique())
     with col2:
-        f_month = st.selectbox("လအလိုက် စစ်ထုတ်ရန်", df['month_year'].unique())
+        f_month = st.selectbox("Filter Month", df['month_year'].unique())
     with col3:
-        f_subject = st.selectbox("ဘာသာရပ်အလိုက် စစ်ထုတ်ရန်", df['subject_name'].unique())
+        f_subject = st.selectbox("Filter Subject", df['subject_name'].unique())
     
     filtered_df = df[(df['class_name'] == f_class) & (df['month_year'] == f_month) & (df['subject_name'] == f_subject)]
     
     if not filtered_df.empty:
-        # Header Info Display
         first_row = filtered_df.iloc[0]
-        st.info(f"📚 **ဌာန:** {first_row['department_name']} | **ဘာသာရပ်:** {first_row['subject_name']} ({first_row['subject_code']}) | **သင်ကြားသည့်ဆရာ/ဆရာမ:** {first_row['teacher_name']}")
+        st.info(f"Department: {first_row['department_name']} | Subject: {first_row['subject_name']} ({first_row['subject_code']}) | Teacher: {first_row['teacher_name']}")
         
-        # Table Display
         display_cols = ['roll_no', 'student_name', 'total_present', 'total_absent', 'attendance_percentage', 'semester', 'month_year']
         st.dataframe(filtered_df[display_cols], use_container_width=True)
         
-        # Excel Export Button
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            filtered_df.to_excel(writer, index=False, sheet_name='Attendance Report')
+            filtered_df.to_excel(writer, index=False, sheet_name='Report')
         excel_data = output.getvalue()
         
         st.download_button(
-            label="📥 Excel ဖိုင်ဖြင့် Report ထုတ်ယူရန်",
+            label="Download Excel Report",
             data=excel_data,
             file_name=f"Attendance_{first_row['subject_code']}_{f_month}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         
-        # Warning System for Low Attendance (< 75%)
         low_attendance = filtered_df[filtered_df['attendance_percentage'] < 75]
         if not low_attendance.empty:
-            st.warning("⚠️ အောက်ပါကျောင်းသားများသည် ဤဘာသာရပ်တွင် တက်ရောက်မှုနှုန်း 75% အောက် နည်းပါနေပါသည် -")
+            st.warning("Students with attendance below 75%:")
             st.dataframe(low_attendance[['roll_no', 'student_name', 'attendance_percentage']], use_container_width=True)
     else:
-        st.info("ရွေးချယ်ထားသော အချက်အလက်များနှင့် ကိုက်ညီသော စာရင်း မရှိသေးပါ။")
+        st.info("No records found for selected filters.")
 else:
-    st.info("လက်ရှိ Database ထဲတွင် သိမ်းဆည်းထား
+    st.info("No data in Database yet.")
